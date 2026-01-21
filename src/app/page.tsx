@@ -188,9 +188,14 @@ export default function Home() {
     ((gameState.currentPlayer === BLACK && role === "black") ||
       (gameState.currentPlayer === WHITE && role === "white"));
 
-  const shareUrl = typeof window !== "undefined"
-    ? `${window.location.origin}?room=${encodeURIComponent(roomId)}`
-    : "";
+  const [shareUrl, setShareUrl] = useState<string>("");
+
+  useEffect(() => {
+    // Only set shareUrl on the client side after hydration
+    if (typeof window !== "undefined") {
+      setShareUrl(`${window.location.origin}?room=${encodeURIComponent(roomId)}`);
+    }
+  }, [roomId]);
 
   return (
     <div className="app">

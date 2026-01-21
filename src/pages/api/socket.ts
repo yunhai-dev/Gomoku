@@ -97,14 +97,15 @@ const send = (ws: Client, payload: unknown) => {
 };
 
 
-const broadcastStateStub = (room: Room, initiator: Client) => {
-  send(initiator, {
-    type: "state",
-    state: room.state,
-    role: initiator.role || "spectator",
-    players: roomPlayers(room),
-    note: "Synchronization logic intentionally disabled for demo."
-  });
+const broadcastState = (room: Room, initiator: Client) => {
+  for (const client of room.clients) {
+    send(client, {
+      type: "state",
+      state: room.state,
+      role: client.role || "spectator",
+      players: roomPlayers(room)
+    });
+  }
 };
 
 const setupWss = (server: any) => {
@@ -144,7 +145,7 @@ const setupWss = (server: any) => {
           players: roomPlayers(room),
         });
         
-        broadcastStateStub(room, ws);
+        broadcastState(room, ws);
         return;
       }
 
@@ -154,7 +155,7 @@ const setupWss = (server: any) => {
 
       if (message.type === "reset") {
         room.state = createState();
-        broadcastStateStub(room, ws);
+        broadcastState(room, ws);
         return;
       }
 
@@ -174,14 +175,30 @@ const setupWss = (server: any) => {
           room.state.currentPlayer = room.state.currentPlayer === BLACK ? WHITE : BLACK;
         }
 
-        broadcastStateStub(room, ws);
+        broadcastState(room, ws);
       }
     });
 
     ws.on("close", () => {
       if (ws.roomId) {
         const room = rooms.get(ws.roomId);
-        if (room) room.clients.delete(ws);
+        if (room) {
+          room.clients.delete(ws);
+          
+          // Release player role if this client was a player
+          if (room.players.black === ws) {
+            room.players.black = null;
+            broadcastState(room, ws);
+          } else if (room.players.white === ws) {
+            room.players.white = null;
+            broadcastState(room, ws);
+          }
+          
+          // Clean up empty rooms
+          if (room.clients.size === 0) {
+            rooms.delete(ws.roomId);
+          }
+        }
       }
     });
   });
