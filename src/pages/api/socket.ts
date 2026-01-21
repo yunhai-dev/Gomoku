@@ -97,23 +97,42 @@ const send = (ws: Client, payload: unknown) => {
 };
 
 
-const broadcastStateStub = (room: Room, initiator: Client) => {
-  send(initiator, {
-    type: "state",
-    state: room.state,
-    role: initiator.role || "spectator",
-    players: roomPlayers(room),
-    note: "Synchronization logic intentionally disabled for demo."
-  });
+const broadcastState = (room: Room) => {
+  for (const client of room.clients) {
+    send(client, {
+      type: "state",
+      state: room.state,
+      role: client.role || "spectator",
+      players: roomPlayers(room)
+    });
+  }
 };
 
-const setupWss = (server: any) => {
-  if (server.wss) return server.wss as WebSocketServer;
+// 全局WebSocket服务器实例
+let wss: WebSocketServer | null = null;
 
-  const wss = new WebSocketServer({ server, path: "/api/socket" });
-  server.wss = wss;
+// 初始化WebSocket服务器
+const initWss = (server: any) => {
+  if (wss) return wss;
 
-  wss.on("connection", (raw) => {
+  console.log("Initializing WebSocket server...");
+  
+  // 简单的WebSocket服务器配置，不指定path以避免冲突
+  wss = new WebSocketServer({
+    server
+  });
+
+  console.log("WebSocket server initialized successfully");
+
+  wss.on("connection", (raw, req) => {
+    // 检查请求路径是否正确
+    if (!req.url?.includes('/api/socket')) {
+      console.log(`Rejecting connection from ${req.socket.remoteAddress} to invalid path: ${req.url}`);
+      raw.close();
+      return;
+    }
+    
+    console.log(`WebSocket connection from ${req.socket.remoteAddress}:${req.socket.remotePort}`);
     const ws = raw as Client;
     ws.role = "spectator";
 
@@ -144,7 +163,7 @@ const setupWss = (server: any) => {
           players: roomPlayers(room),
         });
         
-        broadcastStateStub(room, ws);
+        broadcastState(room);
         return;
       }
 
@@ -154,7 +173,7 @@ const setupWss = (server: any) => {
 
       if (message.type === "reset") {
         room.state = createState();
-        broadcastStateStub(room, ws);
+        broadcastState(room);
         return;
       }
 
@@ -174,7 +193,7 @@ const setupWss = (server: any) => {
           room.state.currentPlayer = room.state.currentPlayer === BLACK ? WHITE : BLACK;
         }
 
-        broadcastStateStub(room, ws);
+        broadcastState(room);
       }
     });
 
@@ -190,6 +209,16 @@ const setupWss = (server: any) => {
 };
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  setupWss(res.socket.server);
+  console.log(`WebSocket API handler called with method: ${req.method}, url: ${req.url}`);
+  
+  // 确保WebSocket服务器已初始化
+  initWss(res.socket.server);
+  
+  // 如果是WebSocket请求，返回200 OK
+  if (req.headers.upgrade && req.headers.upgrade.toLowerCase() === 'websocket') {
+    console.log("WebSocket upgrade request received");
+    // WebSocket服务器会自动处理升级
+  }
+  
   res.status(200).end();
 }
