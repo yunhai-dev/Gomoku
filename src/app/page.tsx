@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const SIZE = 15;
 const EMPTY = 0;
@@ -9,9 +9,35 @@ const WHITE = 2;
 
 type Cell = 0 | 1 | 2;
 type Board = Cell[][];
+type Role = "black" | "white" | "spectator";
+
+type GameState = {
+  board: Board;
+  currentPlayer: Cell;
+  winner: Cell;
+  winningLine: Array<[number, number]>;
+  moveCount: number;
+  lastMove: [number, number] | null;
+  isDraw: boolean;
+};
+
+type PlayerSlots = {
+  black: boolean;
+  white: boolean;
+};
 
 const createBoard = (): Board =>
   Array.from({ length: SIZE }, () => Array.from({ length: SIZE }, () => EMPTY));
+
+const createEmptyState = (): GameState => ({
+  board: createBoard(),
+  currentPlayer: BLACK,
+  winner: EMPTY,
+  winningLine: [],
+  moveCount: 0,
+  lastMove: null,
+  isDraw: false,
+});
 
 const starPoints = new Set(
   [
@@ -23,116 +49,209 @@ const starPoints = new Set(
   ].map(([r, c]) => `${r}-${c}`),
 );
 
-const inBounds = (row: number, col: number) =>
-  row >= 0 && row < SIZE && col >= 0 && col < SIZE;
-
-const checkWin = (board: Board, row: number, col: number) => {
-  const player = board[row][col];
-  if (!player) return null;
-  const directions = [
-    [1, 0],
-    [0, 1],
-    [1, 1],
-    [1, -1],
-  ];
-
-  for (const [dr, dc] of directions) {
-    const line: Array<[number, number]> = [[row, col]];
-    let r = row + dr;
-    let c = col + dc;
-    while (inBounds(r, c) && board[r][c] === player) {
-      line.push([r, c]);
-      r += dr;
-      c += dc;
-    }
-    r = row - dr;
-    c = col - dc;
-    while (inBounds(r, c) && board[r][c] === player) {
-      line.unshift([r, c]);
-      r -= dr;
-      c -= dc;
-    }
-    if (line.length >= 5) {
-      return { winner: player, line };
-    }
-  }
-
-  return null;
-};
-
 const toLabel = (row: number, col: number) => {
   const letters = "ABCDEFGHIJKLMNO";
   return `${letters[col]}${row + 1}`;
 };
 
+const createRoomId = () =>
+  Math.random().toString(36).slice(2, 8).toUpperCase();
+
 export default function Home() {
-  const [board, setBoard] = useState<Board>(createBoard);
-  const [currentPlayer, setCurrentPlayer] = useState<Cell>(BLACK);
-  const [winner, setWinner] = useState<Cell>(EMPTY);
-  const [winningLine, setWinningLine] = useState<Array<[number, number]>>([]);
-  const [moveCount, setMoveCount] = useState(0);
-  const [lastMove, setLastMove] = useState<[number, number] | null>(null);
-  const [isDraw, setIsDraw] = useState(false);
+  const [gameState, setGameState] = useState<GameState>(createEmptyState);
+  const [roomId, setRoomId] = useState("");
+  const [role, setRole] = useState<Role>("spectator");
+  const [players, setPlayers] = useState<PlayerSlots>({
+    black: false,
+    white: false,
+  });
+  const [connection, setConnection] = useState<
+    "disconnected" | "connecting" | "connected"
+  >("disconnected");
+  const [error, setError] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  const winningSet = useMemo(() => {
-    return new Set(winningLine.map(([r, c]) => `${r}-${c}`));
-  }, [winningLine]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const incomingRoom = params.get("room");
+    if (incomingRoom) {
+      setRoomId(incomingRoom.toUpperCase());
+    } else {
+      setRoomId(createRoomId());
+    }
+  }, []);
 
-  const statusText = useMemo(() => {
-    if (winner === BLACK) return "Black wins!";
-    if (winner === WHITE) return "White wins!";
-    if (isDraw) return "Draw — the board is full.";
-    return currentPlayer === BLACK ? "Black to move" : "White to move";
-  }, [winner, isDraw, currentPlayer]);
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
+
+  const connect = () => {
+    if (!roomId.trim()) {
+      setError("Room ID is required.");
+      return;
+    }
+
+    setError(null);
+    setConnection("connecting");
+
+    wsRef.current?.close();
+
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${protocol}://${window.location.host}/api/socket`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "join", roomId: roomId.trim() }));
+    };
+
+    ws.onmessage = (event) => {
+      let message: any;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      if (message.type === "welcome") {
+        setRole(message.role || "spectator");
+        setPlayers(message.players || { black: false, white: false });
+        setConnection("connected");
+        return;
+      }
+
+      if (message.type === "state") {
+        setGameState(message.state);
+        setRole(message.role || "spectator");
+        setPlayers(message.players || { black: false, white: false });
+        setConnection("connected");
+        return;
+      }
+
+      if (message.type === "error") {
+        setError(message.message || "Unknown error.");
+      }
+    };
+
+    ws.onclose = () => {
+      setConnection("disconnected");
+      setRole("spectator");
+      setPlayers({ black: false, white: false });
+    };
+
+    ws.onerror = () => {
+      setError("Connection failed. Check the server and network.");
+    };
+  };
+
+  const disconnect = () => {
+    wsRef.current?.close();
+    wsRef.current = null;
+  };
 
   const handleReset = () => {
-    setBoard(createBoard());
-    setCurrentPlayer(BLACK);
-    setWinner(EMPTY);
-    setWinningLine([]);
-    setMoveCount(0);
-    setLastMove(null);
-    setIsDraw(false);
+    if (connection !== "connected" || !wsRef.current) {
+      setError("Connect to a room before resetting.");
+      return;
+    }
+    wsRef.current.send(JSON.stringify({ type: "reset" }));
   };
 
   const handleMove = (row: number, col: number) => {
-    if (winner || isDraw) return;
-    if (board[row][col] !== EMPTY) return;
-
-    const nextBoard = board.map((line) => line.slice()) as Board;
-    nextBoard[row][col] = currentPlayer;
-
-    const result = checkWin(nextBoard, row, col);
-    const nextMoveCount = moveCount + 1;
-
-    setBoard(nextBoard);
-    setLastMove([row, col]);
-    setMoveCount(nextMoveCount);
-
-    if (result) {
-      setWinner(result.winner as Cell);
-      setWinningLine(result.line);
+    if (connection !== "connected" || !wsRef.current) {
+      setError("Connect to a room before playing.");
       return;
     }
-
-    if (nextMoveCount >= SIZE * SIZE) {
-      setIsDraw(true);
-      return;
-    }
-
-    setCurrentPlayer(currentPlayer === BLACK ? WHITE : BLACK);
+    wsRef.current.send(JSON.stringify({ type: "move", row, col }));
   };
+
+  const statusText = useMemo(() => {
+    if (gameState.winner === BLACK) return "Black wins!";
+    if (gameState.winner === WHITE) return "White wins!";
+    if (gameState.isDraw) return "Draw — the board is full.";
+    return gameState.currentPlayer === BLACK ? "Black to move" : "White to move";
+  }, [gameState]);
+
+  const winningSet = useMemo(() => {
+    return new Set(
+      gameState.winningLine.map(([r, c]) => `${r}-${c}`),
+    );
+  }, [gameState.winningLine]);
+
+  const roleLabel =
+    role === "spectator" ? "Spectator" : role === "black" ? "Black" : "White";
+  const turnLabel =
+    gameState.currentPlayer === BLACK ? "Black" : "White";
+  const canPlay =
+    connection === "connected" &&
+    ((gameState.currentPlayer === BLACK && role === "black") ||
+      (gameState.currentPlayer === WHITE && role === "white"));
+
+  const shareUrl = typeof window !== "undefined"
+    ? `${window.location.origin}?room=${encodeURIComponent(roomId)}`
+    : "";
 
   return (
     <div className="app">
       <main className="stage">
         <section className="panel">
-          <p className="eyebrow">Single-device Gomoku</p>
+          <p className="eyebrow">LAN Gomoku</p>
           <h1>Five in a Row</h1>
           <p className="subtitle">
-            Place stones in turn. The first player to connect five in any
-            direction wins.
+            Connect to the same room on two devices. The first to connect plays
+            Black, the second plays White.
           </p>
+
+          <div className="network-card">
+            <div className="network-row">
+              <label className="status-label" htmlFor="roomId">
+                Room ID
+              </label>
+              <input
+                id="roomId"
+                className="text-input"
+                value={roomId}
+                onChange={(event) => setRoomId(event.target.value.toUpperCase())}
+                placeholder="ROOM"
+              />
+            </div>
+            <div className="network-actions">
+              {connection === "connected" ? (
+                <button className="ghost" onClick={disconnect}>
+                  Disconnect
+                </button>
+              ) : (
+                <button className="primary" onClick={connect}>
+                  {connection === "connecting" ? "Connecting..." : "Connect"}
+                </button>
+              )}
+              <button
+                className="ghost"
+                onClick={() => setRoomId(createRoomId())}
+              >
+                New Room
+              </button>
+            </div>
+            <div className="network-info">
+              <span className="badge">
+                {connection === "connected" ? "Online" : "Offline"}
+              </span>
+              <span>
+                Role: <strong>{roleLabel}</strong>
+              </span>
+              <span>
+                Players:{" "}
+                {players.black ? "Black ✓" : "Black —"} /{" "}
+                {players.white ? "White ✓" : "White —"}
+              </span>
+            </div>
+            <p className="share">
+              Share URL: <span>{shareUrl || "—"}</span>
+            </p>
+            {error && <p className="error">{error}</p>}
+          </div>
+
           <div className="status-card">
             <div className="status-row">
               <span className="status-label">Status</span>
@@ -140,21 +259,26 @@ export default function Home() {
             </div>
             <div className="status-row">
               <span className="status-label">Moves</span>
-              <span className="status-value">{moveCount}</span>
+              <span className="status-value">{gameState.moveCount}</span>
             </div>
             <div className="status-row">
               <span className="status-label">Last Move</span>
               <span className="status-value">
-                {lastMove ? toLabel(lastMove[0], lastMove[1]) : "—"}
+                {gameState.lastMove
+                  ? toLabel(gameState.lastMove[0], gameState.lastMove[1])
+                  : "—"}
               </span>
             </div>
             <div className="status-row">
-              <span className="status-label">Next Player</span>
-              <span className="status-value">
-                {currentPlayer === BLACK ? "Black" : "White"}
-              </span>
+              <span className="status-label">Turn</span>
+              <span className="status-value">{turnLabel}</span>
+            </div>
+            <div className="status-row">
+              <span className="status-label">You Are</span>
+              <span className="status-value">{roleLabel}</span>
             </div>
           </div>
+
           <div className="controls">
             <button className="primary" onClick={handleReset}>
               New Game
@@ -163,31 +287,38 @@ export default function Home() {
               Reset Board
             </button>
           </div>
+
           <div className="tips">
             <h3>Tips</h3>
             <ul>
-              <li>Open with central control to expand your threats.</li>
-              <li>Create two lines at once to force responses.</li>
-              <li>Block early — five in a row ends the game.</li>
+              <li>Stay in sync: wait for your turn before placing.</li>
+              <li>Use the same room ID on both devices.</li>
+              <li>
+                Need a spectator? Share the room and keep the host online.
+              </li>
             </ul>
           </div>
         </section>
 
         <section className="board-wrap">
           <div className="board">
-            {board.map((row, rowIndex) =>
+            {gameState.board.map((row, rowIndex) =>
               row.map((cell, colIndex) => {
                 const key = `${rowIndex}-${colIndex}`;
                 const isStar = starPoints.has(key);
                 const isLast =
-                  lastMove?.[0] === rowIndex && lastMove?.[1] === colIndex;
+                  gameState.lastMove?.[0] === rowIndex &&
+                  gameState.lastMove?.[1] === colIndex;
                 const isWinning = winningSet.has(key);
+                const isBlocked = connection !== "connected" || !canPlay;
                 return (
                   <button
                     key={key}
                     className={`cell${isStar ? " star" : ""}${
                       isLast ? " last" : ""
-                    }${isWinning ? " win" : ""}`}
+                    }${isWinning ? " win" : ""}${
+                      isBlocked ? " blocked" : ""
+                    }`}
                     onClick={() => handleMove(rowIndex, colIndex)}
                     aria-label={`Place at ${toLabel(rowIndex, colIndex)}`}
                   >

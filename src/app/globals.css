@@ -96,6 +96,70 @@ h1 {
   box-shadow: inset 0 0 0 1px rgba(42, 29, 18, 0.1);
 }
 
+.network-card {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  box-shadow: inset 0 0 0 1px rgba(42, 29, 18, 0.1);
+}
+
+.network-row {
+  display: grid;
+  gap: 8px;
+}
+
+.text-input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(42, 29, 18, 0.2);
+  background: white;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.network-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.network-info {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(42, 29, 18, 0.8);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(218, 100, 53, 0.15);
+  color: #9c3d1e;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  width: fit-content;
+}
+
+.share {
+  font-size: 12px;
+  color: rgba(42, 29, 18, 0.7);
+  word-break: break-all;
+}
+
+.error {
+  font-size: 12px;
+  color: #b12222;
+  font-weight: 600;
+}
+
 .status-row {
   display: flex;
   align-items: center;
@@ -198,6 +262,11 @@ button {
   cursor: pointer;
   display: grid;
   place-items: center;
+}
+
+.cell.blocked {
+  cursor: not-allowed;
+  opacity: 0.85;
 }
 
 .cell::after {
