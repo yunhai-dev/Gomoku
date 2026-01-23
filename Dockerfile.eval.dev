@@ -3,7 +3,7 @@
 # 用于 Claude Code 等 Coding Agent 进入容器进行开发工作
 # =============================================================================
 
-ARG NODE_VERSION=16
+ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-bullseye
 
 # 代码包下载地址
