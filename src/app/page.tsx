@@ -98,19 +98,26 @@ export default function Home() {
 
     wsRef.current?.close();
 
+    // 构建WebSocket URL，连接到独立的WebSocket服务器
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/socket`);
+    const wsUrl = `${protocol}://${window.location.hostname}:3001`;
+    console.log(`Connecting to WebSocket: ${wsUrl}`);
+    
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
+      console.log("WebSocket connection opened");
       ws.send(JSON.stringify({ type: "join", roomId: roomId.trim() }));
     };
 
     ws.onmessage = (event) => {
+      console.log("WebSocket message received:", event.data);
       let message: any;
       try {
         message = JSON.parse(event.data);
-      } catch {
+      } catch (error) {
+        console.error("Failed to parse WebSocket message:", error);
         return;
       }
 
@@ -134,14 +141,16 @@ export default function Home() {
       }
     };
 
-    ws.onclose = () => {
+    ws.onerror = (event) => {
+      console.error("WebSocket error:", event);
+      setError("Connection failed. Check the server and network.");
+    };
+
+    ws.onclose = (event) => {
+      console.log("WebSocket connection closed:", event.code, event.reason);
       setConnection("disconnected");
       setRole("spectator");
       setPlayers({ black: false, white: false });
-    };
-
-    ws.onerror = () => {
-      setError("Connection failed. Check the server and network.");
     };
   };
 
@@ -188,9 +197,11 @@ export default function Home() {
     ((gameState.currentPlayer === BLACK && role === "black") ||
       (gameState.currentPlayer === WHITE && role === "white"));
 
-  const shareUrl = typeof window !== "undefined"
-    ? `${window.location.origin}?room=${encodeURIComponent(roomId)}`
-    : "";
+  const [shareUrl, setShareUrl] = useState("");
+
+  useEffect(() => {
+    setShareUrl(`${window.location.origin}?room=${encodeURIComponent(roomId)}`);
+  }, [roomId]);
 
   return (
     <div className="app">
